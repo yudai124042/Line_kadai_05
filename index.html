@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>匿名お悩み相談箱</title>
+  <style>
+    body {
+      background: linear-gradient(to right, #fcefee, #f6f9fc);
+      font-family: 'Helvetica Neue', sans-serif;
+      padding: 20px;
+      margin: 0;
+      color: #333;
+    }
+
+    h1 {
+      text-align: center;
+      color: #d15a7f;
+      margin-bottom: 30px;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      font-size: 16px;
+      resize: vertical;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 10px;
+    }
+
+    button {
+      background-color: #f78fb3;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+        .like-btn {
+        background: none;
+        border: none;
+        color: #d15a7f;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 0;
+        margin-top: 10px;
+        }
+
+.like-btn:hover {
+  color: #e66791;
+  text-decoration: underline;
+}
+
+    button:hover {
+      background-color: #e66791;
+    }
+
+    #output {
+      margin-top: 30px;
+    }
+
+    .post {
+      background: white;
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+      position: relative;
+    }
+
+    .post strong {
+      color: #b03563;
+    }
+
+    .post small {
+      color: #888;
+      font-size: 12px;
+    }
+
+    .reply-box {
+      margin-top: 30px;
+      border-top:1px dashed #ddd;
+      padding-top: 10px;
+    }
+
+    .reply {
+      background: #fdf3f6;
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    .reply input {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      margin-top: 5px;
+      margin-bottom: 5px;
+    }
+
+    .reply-btn {
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🗨️ 匿名お悩み相談箱</h1>
+
+  <textarea id="text" placeholder="あなたの悩みを投稿してください..."></textarea>
+  <button id="send">投稿する</button>
+
+  <div id="output"></div>
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.1.0/firebase-app.js";
+    import {
+      getDatabase,
+      ref,
+      push,
+      set,
+      onChildAdded,
+      onValue,
+      update,
+      get
+    } from "https://www.gstatic.com/firebasejs/9.1.0/firebase-database.js";
+
+    const firebaseConfig = {
+ 
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const postsRef = ref(db, "posts");
+
+    // 投稿処理
+    $("#send").on("click", function () {
+      const msg = {
+        uname: "匿名さん",
+        text: $("#text").val(),
+        time: new Date().toLocaleString(),
+        likes: 0
+      };
+      const newPostRef = push(postsRef);
+      set(newPostRef, msg);
+      $("#text").val("");
+    });
+
+    // 投稿表示といいねのリアルタイム更新
+    onChildAdded(postsRef, function (data) {
+      const msg = data.val();
+      const postId = data.key;
+
+      let html = `
+        <div class="post" id="post-${postId}">
+          <p><strong>${msg.uname}</strong></p>
+          <p>${msg.text}</p>
+          <small>${msg.time}</small>
+          <button class="like-btn" data-id="${postId}">
+            ❤️ いいね (<span id="like-count-${postId}">${msg.likes}</span>)
+          </button>
+          <div class="reply-box" id="replies-${postId}"></div>
+          <input type="text" class="reply-input" data-id="${postId}" placeholder="返信を書く...">
+          <button class="reply-btn" data-id="${postId}">返信</button>
+        </div>
+      `;
+      $("#output").prepend(html);
+
+      // リアルタイムでいいね数を更新
+      const likeCountRef = ref(db, `posts/${postId}/likes`);
+      onValue(likeCountRef, (snap) => {
+        const updatedLikes = snap.val() || 0;
+        $(`#like-count-${postId}`).text(updatedLikes);
+      });
+
+      // リアルタイム返信表示
+      const replyRef = ref(db, `posts/${postId}/replies`);
+      onChildAdded(replyRef, function (snap) {
+        const r = snap.val();
+        const replyHtml = `
+          <div class="reply">
+            <p><strong>匿名さん</strong>：${r.text}</p>
+            <small>${r.time}</small>
+          </div>
+        `;
+        $(`#replies-${postId}`).append(replyHtml);
+      });
+    });
+
+    // 返信処理
+    $(document).on("click", ".reply-btn", function () {
+      const postId = $(this).data("id");
+      const input = $(`.reply-input[data-id='${postId}']`);
+      const text = input.val();
+      const replyRef = ref(db, `posts/${postId}/replies`);
+      const replyData = {
+        text,
+        time: new Date().toLocaleString()
+      };
+      push(replyRef, replyData);
+      input.val("");
+    });
+
+    // いいね処理
+    $(document).on("click", ".like-btn", function () {
+      const postId = $(this).data("id");
+      const likeRef = ref(db, `posts/${postId}/likes`);
+      get(likeRef).then((snapshot) => {
+        const currentLikes = snapshot.val() || 0;
+        update(ref(db, `posts/${postId}`), {
+          likes: currentLikes + 1
+        });
+      });
+    });
+  </script>
+</body>
+</html>
